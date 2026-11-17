@@ -1,0 +1,67 @@
+name: Build OpnForm client
+
+on:
+  workflow_dispatch:
+    inputs:
+      opnform_ref:
+        description: "OpnForm branch or tag to build"
+        default: "main"
+        required: true
+      api_base_url:
+        description: "Public URL of your OpnForm API (used at build time; can be overridden at runtime)"
+        default: "http://localhost/api"
+        required: true
+  schedule:
+    - cron: "0 3 * * 1" # weekly rebuild, Mondays 03:00 UTC (remove if you don't want it)
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OPNFORM_REF: ${{ github.event.inputs.opnform_ref || 'main' }}
+      API_BASE_URL: ${{ github.event.inputs.api_base_url || 'http://localhost/api' }}
+    steps:
+      - name: Checkout OpnForm
+        uses: actions/checkout@v4
+        with:
+          repository: OpnForm/OpnForm
+          ref: ${{ env.OPNFORM_REF }}
+          path: OpnForm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: OpnForm/client
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build client
+        working-directory: OpnForm/client
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          NUXT_PUBLIC_API_BASE: ${{ env.API_BASE_URL }}
+          NUXT_API_BASE: ${{ env.API_BASE_URL }}
+        run: |
+          if [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; fi
+          npm run build
+
+      - name: Package build
+        run: |
+          test -f OpnForm/client/.output/server/index.mjs
+          tar -czf opnform-client.tar.gz -C OpnForm/client .output
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create latest opnform-client.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "OpnForm client (latest build)" \
+            --notes "Built from OpnForm/OpnForm@${OPNFORM_REF} on $(date -u +%F)"
