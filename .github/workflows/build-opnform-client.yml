@@ -34,12 +34,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install dependencies
         working-directory: OpnForm/client
         run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm ci || { echo "npm ci failed (lockfile out of sync), falling back to npm install"; rm -rf node_modules; npm install; }
 
       - name: Build client
         working-directory: OpnForm/client
